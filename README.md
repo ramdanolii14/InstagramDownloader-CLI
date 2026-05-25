@@ -1,7 +1,7 @@
 # ig-cli.sh — Instagram Downloader CLI
 
 A command-line tool for downloading photos and videos from public and private Instagram profiles directly from your terminal. Built on top of `gallery-dl` and `yt-dlp`, it handles authentication via browser cookies, tracks download progress in real time, and persists session configuration so you only set it up once.  
-Everything has been tested on arch linux. You can try on any distro, if the script didn't work on your machine, go to the issues tab and open the issues.
+Everything has been tested on Arch Linux. You can try on any distro — if the script doesn't work on your machine, go to the issues tab and open an issue.
 
 ---
 
@@ -70,14 +70,14 @@ Before running the script, make sure the following are available on your system.
 
 ## Installation
 
-**Step 1. Clone or download the script.**
+**Step 1. Clone the repository.**
 
 ```bash
 git clone https://github.com/ramdanolii14/InstagramDownloader-CLI.git
-cd ig-cli
+cd InstagramDownloader-CLI
 ```
 
-Or download the file directly:
+Or download the script directly without cloning:
 
 ```bash
 curl -O https://raw.githubusercontent.com/ramdanolii14/InstagramDownloader-CLI/main/ig-cli.sh
@@ -117,42 +117,42 @@ rm .igdownload_config
 
 ## Windows Setup Guide
 
-Karena `ig-cli.sh` adalah Bash script, Windows tidak bisa menjalankannya secara langsung. Ada dua cara yang bisa kamu pilih: pakai **WSL (Windows Subsystem for Linux)** yang lebih stabil dan direkomendasikan, atau pakai **Git Bash** yang lebih ringan dan cepat setup-nya.
+`ig-cli.sh` is a Bash script, so Windows cannot run it natively. There are two options: **WSL (Windows Subsystem for Linux)**, which is more stable and fully compatible, or **Git Bash**, which is lighter and faster to set up.
 
 ---
 
-### Cara 1: Menggunakan WSL (Direkomendasikan)
+### Option 1: WSL — Windows Subsystem for Linux (Recommended)
 
-WSL memungkinkan kamu menjalankan Linux secara penuh di dalam Windows — termasuk `apt`, Python, pipx, dan semua dependensi yang dibutuhkan script ini.
+WSL lets you run a real Linux environment inside Windows, including `apt`, Python, pipx, and all dependencies this script needs.
 
 #### Step 1 — Install WSL
 
-Buka **PowerShell** atau **Command Prompt** sebagai Administrator, lalu jalankan:
+Open **PowerShell** or **Command Prompt** as Administrator and run:
 
 ```powershell
 wsl --install
 ```
 
-Perintah ini akan menginstall WSL beserta Ubuntu secara otomatis. Tunggu sampai selesai, lalu **restart komputer kamu**.
+This installs WSL along with Ubuntu automatically. Wait for it to finish, then **restart your computer**.
 
-> Kalau muncul error "WSL is not supported", pastikan fitur **Virtual Machine Platform** sudah aktif di Windows Features, atau coba jalankan dua perintah ini dulu:
+> **If you get an error saying WSL is not supported**, enable the required Windows features first:
 > ```powershell
 > dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
 > dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
 > ```
-> Lalu restart, dan jalankan `wsl --install` lagi.
+> Restart your PC, then run `wsl --install` again.
 
-#### Step 2 — Buka Ubuntu
+#### Step 2 — Open Ubuntu
 
-Setelah restart, buka **Ubuntu** dari Start Menu. Pertama kali buka, kamu akan diminta membuat username dan password untuk Linux — isi sesuai keinginan.
+After restarting, open **Ubuntu** from the Start Menu. On first launch you will be asked to create a Linux username and password — fill in whatever you like.
 
-#### Step 3 — Install Git di dalam WSL
+#### Step 3 — Install Git inside WSL
 
 ```bash
 sudo apt update && sudo apt install git -y
 ```
 
-#### Step 4 — Install Python dan pipx
+#### Step 4 — Install Python and pipx
 
 ```bash
 sudo apt install python3 python3-pip pipx -y
@@ -160,24 +160,24 @@ pipx ensurepath
 source ~/.bashrc
 ```
 
-#### Step 5 — Clone dan jalankan script
+#### Step 5 — Clone and run the script
 
 ```bash
 git clone https://github.com/ramdanolii14/InstagramDownloader-CLI.git
-cd ig-cli
+cd InstagramDownloader-CLI
 chmod +x ig-cli.sh
 ./ig-cli.sh
 ```
 
-#### Mengakses file hasil download di Windows
+#### Accessing downloaded files from Windows
 
-File yang didownload tersimpan di dalam filesystem WSL. Untuk membukanya di File Explorer Windows, ketik di address bar:
+Files are stored inside the WSL filesystem. To open them in Windows File Explorer, type this in the address bar:
 
 ```
-\\wsl$\Ubuntu\home\<username_kamu>\Pictures
+\\wsl$\Ubuntu\home\<your_linux_username>\Pictures
 ```
 
-Atau langsung dari terminal WSL:
+Or from the WSL terminal, open the current folder directly in Explorer:
 
 ```bash
 explorer.exe .
@@ -185,100 +185,101 @@ explorer.exe .
 
 ---
 
-### Cara 2: Menggunakan Git Bash
+### Option 2: Git Bash
 
-Git Bash adalah emulator terminal Bash yang datang bersama Git for Windows. Lebih ringan dari WSL, tapi beberapa fitur Linux tidak tersedia — sudah cukup untuk menjalankan script ini.
+Git Bash is a Bash emulator that comes bundled with Git for Windows. It is lighter than WSL and works well enough to run this script.
 
-#### Step 1 — Download dan Install Git for Windows
+#### Step 1 — Download and Install Git for Windows
 
-1. Buka browser, pergi ke **https://git-scm.com/download/win**
-2. Download versi terbaru (pilih **64-bit Git for Windows Setup**)
-3. Jalankan installer-nya, dan ikuti langkah-langkah berikut saat instalasi:
+1. Go to **https://git-scm.com/download/win**
+2. Download the latest **64-bit Git for Windows Setup**
+3. Run the installer and pay attention to these options:
 
-   - **Select Components** — biarkan default, pastikan **Git Bash Here** dicentang
-   - **Choosing the default editor** — pilih sesuai selera (Notepad++ atau Nano kalau bingung)
-   - **Adjusting your PATH environment** — pilih **"Git from the command line and also from 3rd-party software"**
-   - **Choosing HTTPS transport backend** — biarkan default (**OpenSSL**)
-   - **Configuring the line ending conversions** — pilih **"Checkout as-is, commit Unix-style line endings"** (penting supaya script `.sh` tidak rusak)
-   - **Configuring the terminal emulator** — pilih **"Use MinTTY"**
-   - Klik **Install** dan tunggu sampai selesai
+   | Screen | What to choose |
+   |---|---|
+   | Select Components | Leave defaults; make sure **Git Bash Here** is checked |
+   | Default editor | Pick any editor you like (Notepad++ or Nano are fine) |
+   | Adjusting PATH | Choose **"Git from the command line and also from 3rd-party software"** |
+   | HTTPS transport backend | Leave default (OpenSSL) |
+   | Line ending conversions | Choose **"Checkout as-is, commit Unix-style line endings"** — important so `.sh` files are not corrupted |
+   | Terminal emulator | Choose **"Use MinTTY"** |
+
+4. Click **Install** and wait for it to finish.
 
 #### Step 2 — Install Python for Windows
 
-1. Buka **https://www.python.org/downloads/windows/**
-2. Download versi terbaru (Python 3.11 atau lebih baru)
-3. Jalankan installer, dan **centang "Add Python to PATH"** sebelum klik Install
-4. Klik **Install Now**
+1. Go to **https://www.python.org/downloads/windows/**
+2. Download the latest release (Python 3.11 or newer)
+3. Run the installer and **check "Add Python to PATH"** before clicking Install Now
 
-Verifikasi instalasi di Git Bash:
+Verify the install inside Git Bash:
 
 ```bash
 python --version
 pip --version
 ```
 
-#### Step 3 — Buka Git Bash
+#### Step 3 — Open Git Bash
 
-Setelah install, cari **Git Bash** di Start Menu dan buka. Kamu akan melihat terminal dengan prompt seperti Linux.
+Search for **Git Bash** in the Start Menu and open it. You will see a terminal with a Linux-style prompt.
 
-#### Step 4 — Clone dan jalankan script
+#### Step 4 — Clone and run the script
 
 ```bash
 git clone https://github.com/ramdanolii14/InstagramDownloader-CLI.git
-cd ig-cli
+cd InstagramDownloader-CLI
 chmod +x ig-cli.sh
 ./ig-cli.sh
 ```
 
-> **Catatan:** Kalau muncul error `python3: command not found`, coba ganti dengan `python` (tanpa angka 3) karena Windows menggunakan nama itu. Script mungkin perlu diedit di baris yang memanggil `python3`.
+> **If you get `python3: command not found`**, Git Bash on Windows uses `python` instead of `python3`. You may need to edit the script and replace `python3` with `python` on the relevant lines.
 
 ---
 
-### Perbandingan WSL vs Git Bash
+### WSL vs Git Bash — Quick Comparison
 
 | | WSL (Ubuntu) | Git Bash |
 |---|---|---|
-| **Setup** | Perlu restart, lebih lama | Langsung pakai setelah install |
-| **Kompatibilitas script** | Penuh — identik dengan Linux | Sebagian besar kompatibel |
-| **`apt` / `pacman`** | Tersedia | Tidak tersedia |
-| **Performa** | Lebih berat | Ringan |
-| **Rekomendasi** | Untuk penggunaan jangka panjang | Untuk coba-coba cepat |
+| **Setup time** | Longer, requires a restart | Quick, ready right after install |
+| **Script compatibility** | Full — identical to Linux | Most things work, some Linux tools missing |
+| **`apt` / package manager** | Available | Not available |
+| **Performance** | Heavier | Lightweight |
+| **Best for** | Long-term use and full compatibility | Quick testing or occasional use |
 
 ---
 
-### Troubleshooting di Windows
+### Windows Troubleshooting
 
 **`./ig-cli.sh: line 2: $'\r': command not found`**
 
-File script punya line ending Windows (CRLF). Konversi ke Unix format:
+The script has Windows-style line endings (CRLF). Convert it to Unix format:
 
 ```bash
 sed -i 's/\r//' ig-cli.sh
 ```
 
-**`pip: command not found` di Git Bash**
+**`pip: command not found` in Git Bash**
 
-Pastikan Python sudah ditambahkan ke PATH saat instalasi. Coba jalankan:
+Make sure Python was added to PATH during installation. Try:
 
 ```bash
 python -m pip --version
 ```
 
-**`pipx: command not found` setelah install**
+**`pipx: command not found` after install**
 
-Jalankan ulang konfigurasi PATH:
+Re-run the PATH setup:
 
 ```bash
 python -m pipx ensurepath
 source ~/.bashrc
 ```
 
-**WSL tidak bisa connect ke internet**
+**WSL has no internet connection**
 
-Coba restart layanan jaringan WSL:
+Restart the WSL network from PowerShell (not inside WSL):
 
 ```powershell
-# Jalankan di PowerShell (bukan WSL)
 wsl --shutdown
 wsl
 ```
@@ -306,12 +307,14 @@ This method produces the most complete cookie file and is more reliable for long
 **Step 6.** When the setup script asks for your cookies file, paste the full path to that file:
 
 ```
-Path file cookies.txt: /home/yourname/Downloads/instagram_cookies.txt
+Path to cookies.txt: /home/yourname/Downloads/instagram_cookies.txt
 ```
 
 The script will copy it to the project directory as `cookies.txt`.
 
-> **Windows users:** Path di Windows seperti `C:\Users\Nama\Downloads\cookies.txt` harus diubah ke format Linux terlebih dahulu. Di WSL gunakan `/mnt/c/Users/Nama/Downloads/cookies.txt`, di Git Bash gunakan `/c/Users/Nama/Downloads/cookies.txt`.
+> **Windows users:** Convert your Windows path to the correct format.
+> - WSL: `C:\Users\Name\Downloads\cookies.txt` → `/mnt/c/Users/Name/Downloads/cookies.txt`
+> - Git Bash: `C:\Users\Name\Downloads\cookies.txt` → `/c/Users/Name/Downloads/cookies.txt`
 
 ---
 
@@ -334,7 +337,7 @@ Use this method if you do not want to install a browser extension.
 **Step 7.** When the setup script prompts you, paste the value:
 
 ```
-Paste sessionid kamu: 12345678901%3AAbCdEfGhIjKlMn%3A99...
+Paste your sessionid: 12345678901%3AAbCdEfGhIjKlMn%3A99...
 ```
 
 **Step 8.** Enter your Instagram username when prompted. This is used to construct a minimal valid cookie file in Netscape format.
@@ -369,7 +372,7 @@ The script then starts gallery-dl with a 2-second request delay between fetches,
 ## Project Structure
 
 ```
-ig-cli/
+InstagramDownloader-CLI/
     ig-cli.sh               Main script
     .igdownload_config      Auto-generated config file (created after first setup)
     cookies.txt             Instagram session cookies (created during setup)
