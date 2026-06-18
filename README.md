@@ -53,6 +53,7 @@ Everything has been tested on Arch Linux. You can try on any distro — if the s
 | gallery-dl | Core Instagram media extractor |
 | yt-dlp | Video download backend injected into gallery-dl |
 | pipx | Isolated Python binary installation |
+| ffmpeg | For Video Stuff of course |
 | Netscape cookie format | Session authentication passed to gallery-dl |
 
 ---
