@@ -1,4 +1,7 @@
-# ig-cli.sh — Instagram Downloader CLI
+# ig-cli.sh Instagram Downloader CLI
+
+
+! Im Currently using windows, so im gonna optimized it for windows user  
 
 A command-line tool for downloading photos and videos from public and private Instagram profiles directly from your terminal. Built on top of `gallery-dl` and `yt-dlp`, it handles authentication via browser cookies, tracks download progress in real time, and persists session configuration so you only set it up once.  
 Everything has been tested on Arch Linux. You can try on any distro — if the script doesn't work on your machine, go to the issues tab and open an issue.
