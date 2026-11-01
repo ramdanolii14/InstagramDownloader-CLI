@@ -118,6 +118,7 @@ class InstagramArchiveApp:
             "current_bytes": 0,
             "current_speed": 0.0,
             "current_percent": None,
+            "transfer_detail": "",
             "completed": 0,
             "skipped": 0,
             "failed": 0,
@@ -735,6 +736,7 @@ class InstagramArchiveApp:
             "current_bytes": 0,
             "current_speed": 0.0,
             "current_percent": None,
+            "transfer_detail": "",
             "completed": 0,
             "skipped": 0,
             "failed": 0,
@@ -792,7 +794,7 @@ class InstagramArchiveApp:
                     return
 
             # gallery-dl updates terminal download meters with carriage returns.
-            if re.search(r"(?i)\bB/s\b", segment) or re.search(r"\d{1,3}%\s+[^ ]+\s+[^ ]+", segment):
+            if re.search(r"(?i)[KMGTPE]?B/s", segment) or re.search(r"\d{1,3}%\s+[^ ]+\s+[^ ]+", segment):
                 self.events.put(("file_meter", segment))
             else:
                 self.events.put(("log", segment))
@@ -1270,6 +1272,7 @@ class InstagramArchiveApp:
                         "current_bytes": 0,
                         "current_speed": 0.0,
                         "current_percent": None,
+            "transfer_detail": "",
                         "phase": "Preparing download...",
                         "last_activity": time.monotonic(),
                     })
@@ -1298,6 +1301,7 @@ class InstagramArchiveApp:
                     self.download_metrics["current_bytes"] = 0
                     self.download_metrics["current_speed"] = 0.0
                     self.download_metrics["current_percent"] = None
+                    self.download_metrics["transfer_detail"] = ""
                     self.download_metrics["phase"] = "File completed."
                     self.append_log(f"Completed: {value}")
                 elif event == "file_skip":
