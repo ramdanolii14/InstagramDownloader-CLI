@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import webbrowser
@@ -106,6 +108,23 @@ class InstagramArchiveApp:
         self.worker_thread: threading.Thread | None = None
         self.events: queue.Queue = queue.Queue()
         self.download_started = False
+        self.download_active = False
+        self.download_stop_event: threading.Event | None = None
+        self.download_log_history: list[str] = []
+        self.download_metrics = {
+            "started_at": None,
+            "last_activity": None,
+            "current_file": "",
+            "current_bytes": 0,
+            "current_speed": 0.0,
+            "current_percent": None,
+            "transfer_detail": "",
+            "completed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "phase": "Ready",
+        }
+        self._last_download_ui_refresh = 0.0
         self.profile_info = None
         self.repo_info = None
         self.install_running = False
@@ -393,6 +412,44 @@ class InstagramArchiveApp:
             check.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 28), pady=3)
         self.toggle_categories()
 
+        progress_card = self.card_frame(form)
+        progress_card.pack(fill="x", pady=(0, 10))
+        progress_head = tk.Frame(progress_card, bg=self.card)
+        progress_head.pack(fill="x")
+        self.label(progress_head, "5. Download progress", size=11, bold=True, bg=self.card).pack(anchor="w")
+        self.download_elapsed_label = self.label(
+            progress_head, "Elapsed: 00:00", size=9, color=self.muted, bg=self.card
+        )
+        self.download_elapsed_label.pack(side="right")
+
+        self.download_stats_label = self.label(
+            progress_card, "Completed: 0   |   Skipped: 0   |   Failed: 0",
+            size=9, color=self.text, bg=self.card, bold=True
+        )
+        self.download_stats_label.pack(anchor="w", pady=(8, 7))
+
+        self.label(progress_card, "Current file", size=8, color=self.muted, bg=self.card).pack(anchor="w")
+        self.current_file_label = self.label(
+            progress_card, "Waiting to start...", size=9, color=self.text, bg=self.card,
+            wraplength=760, justify="left"
+        )
+        self.current_file_label.pack(anchor="w", pady=(2, 3))
+        self.current_file_detail = self.label(
+            progress_card, "No file is being processed.", size=8, color=self.muted, bg=self.card
+        )
+        self.current_file_detail.pack(anchor="w", pady=(0, 7))
+
+        self.file_progress = ttk.Progressbar(
+            progress_card, mode="indeterminate", style="Horizontal.TProgressbar"
+        )
+        self.file_progress.pack(fill="x")
+        self.file_progress_mode = None
+        self.download_watch_label = self.label(
+            progress_card, "Ready. Total item count will be discovered while Instagram is scanned.",
+            size=8, color=self.muted, bg=self.card, wraplength=760, justify="left"
+        )
+        self.download_watch_label.pack(anchor="w", pady=(6, 0))
+
         footer = tk.Frame(form, bg=self.bg)
         footer.pack(fill="x", pady=(0, 8))
         self.status_var = tk.StringVar(value="Ready")
@@ -419,8 +476,13 @@ class InstagramArchiveApp:
             font=("Consolas", 9),
         )
         self.log_text.pack(fill="both", expand=True, pady=(9, 0))
-        self.log_text.insert("end", "Ready. Pilih akun, cookies, dan folder tujuan untuk memulai.\n")
+        if self.download_log_history:
+            self.log_text.insert("end", "".join(line + "\n" for line in self.download_log_history[-300:]))
+        else:
+            self.log_text.insert("end", "Ready. Pilih akun, cookies, dan folder tujuan untuk memulai.\n")
         self.log_text.configure(state="disabled")
+        self.set_download_state(self.download_active)
+        self.update_download_dashboard()
 
     def toggle_categories(self):
         state = "disabled" if self.all_var.get() else "normal"
@@ -446,15 +508,21 @@ class InstagramArchiveApp:
             self.output_var.set(path)
 
     def append_log(self, message: str):
-        if not hasattr(self, "log_text") or not self.log_text.winfo_exists():
-            return
-        self.log_text.configure(state="normal")
         stamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.insert("end", f"[{stamp}] {message.rstrip()}\n")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
+        line = f"[{stamp}] {message.rstrip()}"
+        self.download_log_history.append(line)
+        self.download_log_history = self.download_log_history[-1000:]
+        try:
+            if hasattr(self, "log_text") and self.log_text.winfo_exists():
+                self.log_text.configure(state="normal")
+                self.log_text.insert("end", line + "\n")
+                self.log_text.see("end")
+                self.log_text.configure(state="disabled")
+        except tk.TclError:
+            pass
 
     def clear_log(self):
+        self.download_log_history.clear()
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
@@ -467,6 +535,7 @@ class InstagramArchiveApp:
             pass
 
     def set_download_state(self, running: bool):
+        self.download_active = running
         try:
             if not hasattr(self, "download_button") or not self.download_button.winfo_exists():
                 return
@@ -477,12 +546,109 @@ class InstagramArchiveApp:
                 self.set_status(" Downloading...", self.yellow)
             else:
                 self.progress.stop()
+            self.update_download_dashboard()
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def format_bytes(value: int | float) -> str:
+        number = max(0.0, float(value))
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if number < 1024 or unit == "TB":
+                return f"{number:.1f} {unit}" if unit != "B" else f"{int(number)} B"
+            number /= 1024
+        return f"{number:.1f} TB"
+
+    @staticmethod
+    def format_elapsed(seconds: float) -> str:
+        total = max(0, int(seconds))
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def set_file_progress_mode(self, mode: str):
+        try:
+            if not hasattr(self, "file_progress") or not self.file_progress.winfo_exists():
+                return
+            if self.file_progress_mode == mode:
+                return
+            self.file_progress.stop()
+            self.file_progress.configure(mode=mode, maximum=100)
+            self.file_progress_mode = mode
+            if mode == "indeterminate" and self.download_active:
+                self.file_progress.start(12)
+        except tk.TclError:
+            pass
+
+    def update_download_dashboard(self):
+        try:
+            if not hasattr(self, "download_stats_label") or not self.download_stats_label.winfo_exists():
+                return
+            metrics = self.download_metrics
+            self.download_stats_label.configure(
+                text=(
+                    f"Completed: {metrics['completed']}   |   "
+                    f"Skipped: {metrics['skipped']}   |   "
+                    f"Failed: {metrics['failed']}"
+                )
+            )
+
+            started_at = metrics.get("started_at")
+            elapsed = time.monotonic() - started_at if started_at else 0
+            self.download_elapsed_label.configure(text=f"Elapsed: {self.format_elapsed(elapsed)}")
+
+            current_file = metrics.get("current_file") or ""
+            if current_file:
+                file_name = Path(current_file).name or current_file
+                self.current_file_label.configure(text=file_name)
+                detail = f"Downloaded: {self.format_bytes(metrics.get('current_bytes', 0))}"
+                speed = metrics.get("current_speed", 0.0)
+                if speed > 0:
+                    detail += f"   |   Speed: {self.format_bytes(speed)}/s"
+                transfer_detail = metrics.get("transfer_detail")
+                if transfer_detail:
+                    detail += f"   |   {transfer_detail.strip()}"
+                percent = metrics.get("current_percent")
+                if percent is not None:
+                    detail += f"   |   {percent:.1f}%"
+                    self.set_file_progress_mode("determinate")
+                    self.file_progress.configure(value=max(0, min(100, percent)))
+                else:
+                    self.set_file_progress_mode("indeterminate")
+                self.current_file_detail.configure(text=detail)
+            else:
+                self.current_file_label.configure(
+                    text="Scanning account / waiting for the next file..."
+                    if self.download_active else "No file is currently being processed."
+                )
+                self.current_file_detail.configure(text=metrics.get("phase") or "Ready")
+                self.set_file_progress_mode("indeterminate" if self.download_active else "determinate")
+                if not self.download_active:
+                    self.file_progress.configure(value=0)
+
+            if self.download_active:
+                last_activity = metrics.get("last_activity") or time.monotonic()
+                idle = int(max(0, time.monotonic() - last_activity))
+                if current_file and idle >= 15:
+                    state = f"No new file data for {idle}s. Waiting for network response or retry timeout."
+                elif current_file:
+                    state = f"Downloading file • last data update {idle}s ago"
+                elif idle >= 15:
+                    state = f"Waiting for Instagram response ({idle}s). Request timeout and retry limits are active."
+                else:
+                    state = "Scanning Instagram posts and preparing the next file..."
+                self.download_watch_label.configure(text=state, fg=self.yellow if idle >= 15 else self.muted)
+            else:
+                self.download_watch_label.configure(
+                    text=metrics.get("phase") or "Ready. Total item count is not known before scanning.",
+                    fg=self.green if metrics.get("phase") == "Download completed." else self.muted,
+                )
         except tk.TclError:
             pass
 
     def start_download(self):
-        if self.process is not None:
-            messagebox.showinfo("Download is running", "Selesaikan atau hentikan proses yang sedang berjalan terlebih dahulu.")
+        if self.download_active:
+            messagebox.showinfo("Download is running", "Satu proses arsip masih berjalan.")
             return
 
         username = normalize_username(self.username_var.get())
@@ -529,7 +695,6 @@ class InstagramArchiveApp:
         save_settings(self.settings)
 
         profile_url = f"https://www.instagram.com/{username}/"
-        archive_file = output_dir / username / ".gallery-dl-archive.sqlite3"
         target_dir = output_dir / username
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -545,62 +710,213 @@ class InstagramArchiveApp:
             "--directory", str(target_dir),
             "--download-archive", str(archive_file),
             "--sleep-request", "2",
+            "--sleep-429", "60",
+            "--http-timeout", "45",
             "--retries", "3",
+            "--no-colors",
             "-o", f"extractor.instagram.include={include}",
+            "-o", "extractor.instagram.metadata-path=_path",
+            "-o", "downloader.timeout=90",
+            "-o", "downloader.retries=3",
+            "-o", "downloader.part=true",
+            "-o", "downloader.progress=1.0",
+            "-o", "output.mode=terminal",
+            "--Print", "prepare-after:IGARCHIVE_PREPARE|{_path.path}",
+            "--Print", "after:IGARCHIVE_DONE|{_path.path}",
+            "--Print", "skip:IGARCHIVE_SKIP|{_path.path}",
+            "--Print", "error:IGARCHIVE_ERROR|{_path.path}",
             profile_url,
         ]
 
+        now = time.monotonic()
+        self.download_metrics = {
+            "started_at": now,
+            "last_activity": now,
+            "current_file": "",
+            "current_bytes": 0,
+            "current_speed": 0.0,
+            "current_percent": None,
+            "transfer_detail": "",
+            "completed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "phase": "Connecting to Instagram...",
+        }
+        self.download_stop_event = threading.Event()
+        self.set_download_state(True)
         self.append_log(f"Target: @{username}")
         self.append_log(f"Destination: {target_dir}")
         self.append_log(f"Categories: {include}")
         self.append_log("Download dimulai. Konten yang sudah ada di archive database akan dilewati.")
+        self.append_log("Timeout koneksi: 45 detik; timeout download file: 90 detik; retry dibatasi 3 kali.")
+        self.append_log("Progress file memakai ukuran transfer aktual; persentase muncul bila ukuran total file tersedia.")
         self.append_log("Gunakan tombol Stop untuk menghentikan proses dengan aman.")
-        self.set_download_state(True)
+
         self.worker_thread = threading.Thread(
             target=self.run_downloader,
-            args=(command, log_file),
+            args=(command, log_file, target_dir, self.download_stop_event),
             daemon=True,
         )
         self.worker_thread.start()
 
-    def run_downloader(self, command: list[str], log_file: Path):
+    def run_downloader(
+        self,
+        command: list[str],
+        log_file: Path,
+        target_dir: Path,
+        stop_event: threading.Event,
+    ):
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
         return_code = -1
+        monitor_stop = threading.Event()
+        monitor_state = {"path": None}
+        monitor_lock = threading.Lock()
+        process = None
+
+        def handle_segment(segment: str):
+            segment = segment.strip()
+            if not segment:
+                return
+
+            markers = (
+                ("IGARCHIVE_PREPARE|", "file_prepare"),
+                ("IGARCHIVE_DONE|", "file_done"),
+                ("IGARCHIVE_SKIP|", "file_skip"),
+                ("IGARCHIVE_ERROR|", "file_error"),
+            )
+            for marker, event_name in markers:
+                if segment.startswith(marker):
+                    path = segment[len(marker):].strip()
+                    with monitor_lock:
+                        monitor_state["path"] = path if event_name == "file_prepare" else None
+                    self.events.put((event_name, path))
+                    return
+
+            # gallery-dl updates terminal download meters with carriage returns.
+            if re.search(r"(?i)[KMGTPE]?B/s", segment) or re.search(r"\d{1,3}%\s+[^ ]+\s+[^ ]+", segment):
+                self.events.put(("file_meter", segment))
+            else:
+                self.events.put(("log", segment))
+
         try:
             with log_file.open("a", encoding="utf-8", errors="replace") as logfile:
                 logfile.write(f"\n--- Session {datetime.now().isoformat(timespec='seconds')} ---\n")
                 logfile.write("Target command: gallery-dl (arguments hidden)\n")
                 creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                self.process = subprocess.Popen(
+                process = subprocess.Popen(
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
+                    text=False,
+                    bufsize=0,
                     env=env,
                     creationflags=creationflags,
                 )
-                assert self.process.stdout is not None
-                for line in self.process.stdout:
-                    logfile.write(line)
+                self.process = process
+                self.events.put(("download_process_started", None))
+
+                monitor_thread = threading.Thread(
+                    target=self.monitor_partial_file,
+                    args=(monitor_state, monitor_lock, monitor_stop),
+                    daemon=True,
+                )
+                monitor_thread.start()
+
+                if stop_event.is_set():
+                    process.terminate()
+
+                assert process.stdout is not None
+                decoder = codecs.getincrementaldecoder("utf-8")("replace")
+                buffer = ""
+                while True:
+                    chunk = process.stdout.read(4096)
+                    if not chunk:
+                        break
+                    buffer += decoder.decode(chunk)
+                    while True:
+                        positions = [pos for pos in (buffer.find("\r"), buffer.find("\n")) if pos >= 0]
+                        if not positions:
+                            break
+                        cut = min(positions)
+                        segment = buffer[:cut]
+                        buffer = buffer[cut + 1:]
+                        if segment.strip():
+                            handle_segment(segment)
+                            logfile.write(segment + "\n")
+                            logfile.flush()
+
+                buffer += decoder.decode(b"", final=True)
+                if buffer.strip():
+                    handle_segment(buffer)
+                    logfile.write(buffer + "\n")
                     logfile.flush()
-                    self.events.put(("log", line.rstrip()))
-                return_code = self.process.wait()
+                return_code = process.wait()
         except FileNotFoundError:
             self.events.put(("log", "Python module gallery-dl tidak ditemukan. Buka Settings lalu Install dependencies."))
         except Exception as exc:
             self.events.put(("log", f"Downloader error: {exc}"))
         finally:
+            monitor_stop.set()
+            if process is not None:
+                try:
+                    if process.stdout:
+                        process.stdout.close()
+                except OSError:
+                    pass
             self.process = None
             self.events.put(("finished", return_code))
 
+    def monitor_partial_file(
+        self,
+        monitor_state: dict,
+        monitor_lock: threading.Lock,
+        stop_event: threading.Event,
+    ):
+        previous_path = None
+        previous_size = 0
+        previous_time = time.monotonic()
+        while not stop_event.wait(0.6):
+            with monitor_lock:
+                current_path = monitor_state.get("path")
+
+            if not current_path:
+                previous_path = None
+                previous_size = 0
+                previous_time = time.monotonic()
+                continue
+
+            part_path = Path(current_path + ".part")
+            try:
+                size = part_path.stat().st_size
+            except OSError:
+                # The extractor may still be resolving a URL before creating its .part file.
+                continue
+
+            now = time.monotonic()
+            if current_path != previous_path:
+                previous_path = current_path
+                previous_size = size
+                previous_time = now
+                speed = 0.0
+                changed = size > 0
+            else:
+                elapsed = max(0.001, now - previous_time)
+                changed = size > previous_size
+                speed = max(0.0, (size - previous_size) / elapsed) if changed else 0.0
+                previous_size = max(previous_size, size)
+                previous_time = now
+
+            self.events.put(("file_progress", (current_path, size, speed, changed)))
+
     def stop_download(self):
+        if not self.download_active:
+            return
+        self.append_log("Permintaan berhenti dikirim...")
+        if self.download_stop_event:
+            self.download_stop_event.set()
         process = self.process
         if process and process.poll() is None:
-            self.append_log("Permintaan berhenti dikirim...")
             try:
                 process.terminate()
             except OSError as exc:
@@ -914,17 +1230,20 @@ class InstagramArchiveApp:
             self.events.put(("github_error", str(exc)))
 
     def on_close(self):
-        if self.process and self.process.poll() is None:
+        if self.download_active:
             close = messagebox.askyesno(
                 "Download in progress",
                 "Download sedang berjalan. Hentikan proses dan tutup aplikasi?",
             )
             if not close:
                 return
-            try:
-                self.process.terminate()
-            except OSError:
-                pass
+            if self.download_stop_event:
+                self.download_stop_event.set()
+            if self.process and self.process.poll() is None:
+                try:
+                    self.process.terminate()
+                except OSError:
+                    pass
         save_settings(self.settings)
         self.root.destroy()
 
@@ -933,12 +1252,79 @@ class InstagramArchiveApp:
             while True:
                 event, value = self.events.get_nowait()
                 if event == "log":
+                    self.download_metrics["last_activity"] = time.monotonic()
                     self.append_log(value)
                     low = value.lower()
                     if "429" in low or "rate limit" in low:
+                        self.download_metrics["phase"] = "Instagram rate-limited the request; waiting before retry."
                         self.set_status(" Rate limit detected", self.yellow)
                         self.append_log("Instagram memberi respons pembatasan. Hindari percobaan berulang dalam waktu dekat.")
+                    elif "timeout" in low or "timed out" in low:
+                        self.download_metrics["phase"] = "Request timed out; gallery-dl will retry within its configured limit."
+                        self.set_status(" Retrying after timeout...", self.yellow)
+                elif event == "download_process_started":
+                    self.download_metrics["phase"] = "Connected to downloader; scanning account..."
+                    self.download_metrics["last_activity"] = time.monotonic()
+                    self.update_download_dashboard()
+                elif event == "file_prepare":
+                    self.download_metrics.update({
+                        "current_file": value,
+                        "current_bytes": 0,
+                        "current_speed": 0.0,
+                        "current_percent": None,
+            "transfer_detail": "",
+                        "phase": "Preparing download...",
+                        "last_activity": time.monotonic(),
+                    })
+                    self.append_log(f"Preparing: {value}")
+                elif event == "file_progress":
+                    path, size, speed, changed = value
+                    self.download_metrics.update({
+                        "current_file": path,
+                        "current_bytes": size,
+                        "current_speed": speed,
+                        "phase": "Downloading file data..." if changed else "Waiting for file data...",
+                    })
+                    if changed:
+                        self.download_metrics["last_activity"] = time.monotonic()
+                elif event == "file_meter":
+                    self.download_metrics["last_activity"] = time.monotonic()
+                    self.download_metrics["phase"] = "Receiving file data..."
+                    percent_match = re.search(r"(\d{1,3})%", value)
+                    if percent_match:
+                        self.download_metrics["current_percent"] = float(percent_match.group(1))
+                    self.download_metrics["transfer_detail"] = value.strip()
+                elif event == "file_done":
+                    self.download_metrics["completed"] += 1
+                    self.download_metrics["last_activity"] = time.monotonic()
+                    self.download_metrics["current_file"] = ""
+                    self.download_metrics["current_bytes"] = 0
+                    self.download_metrics["current_speed"] = 0.0
+                    self.download_metrics["current_percent"] = None
+                    self.download_metrics["transfer_detail"] = ""
+                    self.download_metrics["phase"] = "File completed."
+                    self.append_log(f"Completed: {value}")
+                elif event == "file_skip":
+                    self.download_metrics["skipped"] += 1
+                    self.download_metrics["last_activity"] = time.monotonic()
+                    self.download_metrics["current_file"] = ""
+                    self.download_metrics["phase"] = "Existing file skipped."
+                    self.append_log(f"Skipped: {value}")
+                elif event == "file_error":
+                    self.download_metrics["failed"] += 1
+                    self.download_metrics["last_activity"] = time.monotonic()
+                    self.download_metrics["current_file"] = ""
+                    self.download_metrics["phase"] = "A file failed; checking the next item."
+                    self.append_log(f"File error: {value}")
                 elif event == "finished":
+                    self.download_metrics["current_file"] = ""
+                    self.download_metrics["current_speed"] = 0.0
+                    self.download_metrics["current_percent"] = None
+                    self.download_metrics["phase"] = (
+                        "Download completed." if value == 0
+                        else f"Download ended with exit code {value}."
+                    )
+                    self.download_metrics["last_activity"] = time.monotonic()
                     self.set_download_state(False)
                     if value == 0:
                         self.set_status(" Completed", self.green)
@@ -974,6 +1360,9 @@ class InstagramArchiveApp:
                         )
         except queue.Empty:
             pass
+        if self.download_active and time.monotonic() - self._last_download_ui_refresh >= 0.5:
+            self._last_download_ui_refresh = time.monotonic()
+            self.update_download_dashboard()
         self.root.after(100, self.poll_events)
 
 def main():
