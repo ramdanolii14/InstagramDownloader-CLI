@@ -1,5 +1,5 @@
 #!/bin/bash
-export PATH="/home/ramdan/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 
 # ─── warna ───────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
