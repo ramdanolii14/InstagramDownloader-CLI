@@ -108,6 +108,10 @@ class InstagramArchiveApp:
         self.download_started = False
         self.profile_info = None
         self.repo_info = None
+        self.install_running = False
+        self.install_process: subprocess.Popen | None = None
+        self.install_logs: list[str] = []
+        self.install_last_error = ""
 
         self.bg = self.settings["background"]
         self.panel = self.settings["panel"]
@@ -630,20 +634,71 @@ class InstagramArchiveApp:
         scale_menu.pack(side="right")
 
         dependencies = self.card_frame(body)
-        dependencies.pack(fill="x", pady=(0, 14))
+        dependencies.pack(fill="both", expand=True, pady=(0, 14))
         self.label(dependencies, "Downloader components", size=13, bold=True, bg=self.card).pack(anchor="w")
         self.label(
             dependencies,
-            "gallery-dl menangani ekstraksi konten dan yt-dlp membantu penanganan video. "
-            "Pemasangan dilakukan pada Python aktif di komputer ini.",
+            "Instalasi berjalan langsung di aplikasi. Tahap, output pip, dan status setiap paket "
+            "akan muncul di bawah ini.",
             size=9, color=self.muted, bg=self.card, wraplength=780, justify="left",
-        ).pack(anchor="w", pady=(6, 12))
-        self.dependency_status = self.label(dependencies, self.dependency_summary(), size=9, color=self.green, bg=self.card)
-        self.dependency_status.pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(6, 10))
+
+        self.dependency_status = self.label(
+            dependencies, self.dependency_summary(), size=9, color=self.green, bg=self.card
+        )
+        self.dependency_status.pack(anchor="w", pady=(0, 7))
+
+        self.install_state_label = self.label(
+            dependencies,
+            "Installation in progress..." if self.install_running else "Ready to install",
+            size=9,
+            color=self.yellow if self.install_running else self.muted,
+            bg=self.card,
+            bold=True,
+        )
+        self.install_state_label.pack(anchor="w", pady=(0, 6))
+
+        self.dependency_progress = ttk.Progressbar(
+            dependencies, mode="indeterminate", length=500, style="Horizontal.TProgressbar"
+        )
+        self.dependency_progress.pack(fill="x", pady=(0, 9))
+        if self.install_running:
+            self.dependency_progress.start(12)
+
         actions = tk.Frame(dependencies, bg=self.card)
-        actions.pack(fill="x")
-        self.button(actions, "Install / update dependencies", self.install_dependencies, primary=True).pack(side="left")
-        self.button(actions, "Check again", self.refresh_dependency_status).pack(side="left", padx=8)
+        actions.pack(fill="x", pady=(0, 9))
+        self.install_button = self.button(
+            actions, "Installing..." if self.install_running else "Install / update dependencies",
+            self.install_dependencies, primary=True
+        )
+        self.install_button.pack(side="left")
+        self.check_button = self.button(actions, "Check again", self.refresh_dependency_status)
+        self.check_button.pack(side="left", padx=8)
+        if self.install_running:
+            self.install_button.configure(state="disabled")
+            self.check_button.configure(state="disabled")
+
+        self.label(dependencies, "Installation log", size=9, color=self.muted, bg=self.card, bold=True).pack(anchor="w", pady=(1, 5))
+        self.dependency_log = tk.Text(
+            dependencies,
+            height=6,
+            wrap="word",
+            bg="#0a1220",
+            fg="#d9e3f5",
+            insertbackground="#ffffff",
+            relief="flat",
+            bd=0,
+            padx=9,
+            pady=7,
+            font=("Consolas", 8),
+        )
+        self.dependency_log.pack(fill="both", expand=True)
+        self.dependency_log.configure(state="disabled")
+        for line in self.install_logs[-200:]:
+            self.dependency_log.configure(state="normal")
+            self.dependency_log.insert("end", line + "\n")
+            self.dependency_log.configure(state="disabled")
+        self.dependency_log.see("end")
 
         storage = self.card_frame(body)
         storage.pack(fill="x")
@@ -660,33 +715,116 @@ class InstagramArchiveApp:
         return f"gallery-dl: {'Installed' if gallery else 'Not installed'}   |   yt-dlp: {'Installed' if video else 'Not installed'}"
 
     def refresh_dependency_status(self):
+        if self.install_running:
+            self.set_dependency_state("Installation is currently running.", self.yellow)
+            return
         if hasattr(self, "dependency_status") and self.dependency_status.winfo_exists():
             self.dependency_status.configure(text=self.dependency_summary())
+        self.set_dependency_state("Ready to install or update dependencies.", self.muted)
 
     def install_dependencies(self):
-        if getattr(self, "install_running", False):
+        if self.install_running:
             return
-        self.install_running = True
-        self.button_install_text = "Installing..."
-        self.append_settings_log("Memasang gallery-dl dan yt-dlp...")
-        def worker():
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "gallery-dl", "yt-dlp"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=900,
-                )
-                output = (result.stdout or "") + (result.stderr or "")
-                self.events.put(("install", (result.returncode, output[-5000:])))
-            except Exception as exc:
-                self.events.put(("install", (-1, str(exc))))
-        threading.Thread(target=worker, daemon=True).start()
 
-    def append_settings_log(self, message):
-        self.events.put(("settings_log", message))
+        self.install_running = True
+        self.install_last_error = ""
+        if hasattr(self, "install_button") and self.install_button.winfo_exists():
+            self.install_button.configure(text="Installing...", state="disabled")
+        if hasattr(self, "check_button") and self.check_button.winfo_exists():
+            self.check_button.configure(state="disabled")
+        if hasattr(self, "dependency_progress") and self.dependency_progress.winfo_exists():
+            self.dependency_progress.configure(mode="indeterminate")
+            self.dependency_progress.start(12)
+        self.set_dependency_state("Preparing dependency installer...", self.yellow)
+        self.append_dependency_log("Starting dependency installation.")
+        self.append_dependency_log(f"Python: {sys.executable}")
+        self.append_dependency_log("Packages: gallery-dl, yt-dlp")
+
+        def worker():
+            exit_code = 0
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+            env["PIP_PROGRESS_BAR"] = "off"
+
+            packages = ("gallery-dl", "yt-dlp")
+            try:
+                for index, package in enumerate(packages, start=1):
+                    self.events.put(("install_stage", (index, len(packages), package)))
+                    command = [
+                        sys.executable, "-u", "-m", "pip", "install",
+                        "--upgrade", "--disable-pip-version-check", "--no-input",
+                        "--progress-bar", "off", package,
+                    ]
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    process = subprocess.Popen(
+                        command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        bufsize=1,
+                        env=env,
+                        creationflags=creationflags,
+                    )
+                    self.install_process = process
+                    if process.stdout is not None:
+                        for raw_line in process.stdout:
+                            line = raw_line.rstrip()
+                            if line:
+                                self.events.put(("install_line", line))
+                    exit_code = process.wait()
+                    self.install_process = None
+                    if exit_code != 0:
+                        self.events.put(("install_line", f"pip exited with code {exit_code} while installing {package}."))
+                        break
+
+                self.events.put(("install_finished", exit_code))
+            except Exception as exc:
+                self.install_process = None
+                self.events.put(("install_line", f"Installer error: {exc}"))
+                self.events.put(("install_finished", -1))
+
+        self.worker_thread = threading.Thread(target=worker, daemon=True)
+        self.worker_thread.start()
+
+    def append_dependency_log(self, message: str):
+        stamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{stamp}] {message}"
+        self.install_logs.append(line)
+        self.install_logs = self.install_logs[-500:]
+        try:
+            if hasattr(self, "dependency_log") and self.dependency_log.winfo_exists():
+                self.dependency_log.configure(state="normal")
+                self.dependency_log.insert("end", line + "\n")
+                self.dependency_log.see("end")
+                self.dependency_log.configure(state="disabled")
+        except tk.TclError:
+            pass
+
+    def set_dependency_state(self, message: str, color: str):
+        try:
+            if hasattr(self, "install_state_label") and self.install_state_label.winfo_exists():
+                self.install_state_label.configure(text=message, fg=color)
+        except tk.TclError:
+            pass
+
+    def finish_dependency_install(self, exit_code: int):
+        self.install_running = False
+        if hasattr(self, "dependency_progress") and self.dependency_progress.winfo_exists():
+            self.dependency_progress.stop()
+        if hasattr(self, "install_button") and self.install_button.winfo_exists():
+            self.install_button.configure(text="Install / update dependencies", state="normal")
+        if hasattr(self, "check_button") and self.check_button.winfo_exists():
+            self.check_button.configure(state="normal")
+
+        self.refresh_dependency_status()
+        if exit_code == 0:
+            self.set_dependency_state("Installation completed successfully.", self.green)
+            self.append_dependency_log("All dependencies installed successfully.")
+        else:
+            self.set_dependency_state(f"Installation failed (exit code {exit_code}). See log above.", self.red)
+            self.append_dependency_log("Installation failed. Review the last pip messages above.")
 
     def choose_background(self):
         selected = colorchooser.askcolor(color=self.bg, title="Choose background color")
@@ -808,18 +946,17 @@ class InstagramArchiveApp:
                     else:
                         self.set_status(f" Finished ({value})", self.yellow)
                         self.append_log(f"gallery-dl selesai dengan exit code {value}. Periksa log untuk detail.")
-                elif event == "install":
-                    self.install_running = False
-                    code, output = value
-                    self.append_log(f"Dependency installer exit code: {code}")
-                    self.append_log(output or "Tidak ada output.")
-                    self.refresh_dependency_status()
-                    if code == 0:
-                        messagebox.showinfo("Dependencies installed", "gallery-dl dan yt-dlp berhasil dipasang atau diperbarui.")
-                    else:
-                        messagebox.showerror("Installation failed", "Pemasangan gagal. Periksa Activity log atau jalankan install_windows.bat.")
-                elif event == "settings_log":
-                    self.append_log(value)
+                elif event == "install_stage":
+                    index, total, package = value
+                    self.set_dependency_state(
+                        f"Installing {package} ({index}/{total})...",
+                        self.yellow,
+                    )
+                    self.append_dependency_log(f"Step {index}/{total}: installing {package}.")
+                elif event == "install_line":
+                    self.append_dependency_log(value)
+                elif event == "install_finished":
+                    self.finish_dependency_install(value)
                 elif event == "github":
                     self.profile_info = value
                     if hasattr(self, "github_status") and self.github_status.winfo_exists():
