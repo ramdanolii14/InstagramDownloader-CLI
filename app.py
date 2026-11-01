@@ -360,13 +360,87 @@ class InstagramArchiveApp:
         ).pack(anchor="w")
 
     def render_download(self, body):
-        form = tk.Frame(body, bg=self.bg)
-        form.pack(fill="both", expand=True)
+        # Keep the primary actions outside the scrollable area so they remain
+        # visible even on short laptop screens or when the window is resized.
+        page = tk.Frame(body, bg=self.bg)
+        page.pack(fill="both", expand=True)
+
+        footer = tk.Frame(page, bg=self.panel, padx=12, pady=9)
+        footer.pack(side="bottom", fill="x", pady=(8, 0))
+
+        status_area = tk.Frame(footer, bg=self.panel)
+        status_area.pack(side="left", fill="x", expand=True)
+        self.status_var = tk.StringVar(value="Ready")
+        self.label(status_area, "Status:", size=9, color=self.muted, bg=self.panel).pack(side="left")
+        self.status_label = self.label(
+            status_area, " Ready", size=9, color=self.green, bg=self.panel, bold=True
+        )
+        self.status_label.pack(side="left")
+
+        self.download_button = self.button(
+            footer, "Start download", self.start_download, primary=True
+        )
+        self.download_button.pack(side="right", padx=(8, 0))
+
+        self.stop_button = self.button(footer, "Stop", self.stop_download)
+        self.stop_button.pack(side="right", padx=(8, 0))
+        self.stop_button.configure(state="disabled")
+
+        self.progress = ttk.Progressbar(
+            footer, mode="indeterminate", length=110, style="Horizontal.TProgressbar"
+        )
+        self.progress.pack(side="right", padx=(8, 0))
+
+        # Scrollable form content. The action bar above stays pinned at the
+        # bottom and cannot be pushed out by tall account/category sections.
+        scroll_container = tk.Frame(page, bg=self.bg)
+        scroll_container.pack(side="top", fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            scroll_container,
+            bg=self.bg,
+            highlightthickness=0,
+            bd=0,
+            relief="flat",
+        )
+        scrollbar = ttk.Scrollbar(
+            scroll_container, orient="vertical", command=canvas.yview
+        )
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        form = tk.Frame(canvas, bg=self.bg)
+        canvas_window = canvas.create_window((0, 0), window=form, anchor="nw")
+
+        def update_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def resize_form(event):
+            canvas.itemconfigure(canvas_window, width=event.width)
+
+        form.bind("<Configure>", update_scroll_region)
+        canvas.bind("<Configure>", resize_form)
+
+        def scroll_with_mouse(event):
+            if getattr(event, "delta", 0):
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+            elif getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(3, "units")
+
+        canvas.bind("<MouseWheel>", scroll_with_mouse)
+        canvas.bind("<Button-4>", scroll_with_mouse)
+        canvas.bind("<Button-5>", scroll_with_mouse)
 
         account_card = self.card_frame(form)
         account_card.pack(fill="x", pady=(0, 12))
         self.label(account_card, "1. Instagram account", size=12, bold=True, bg=self.card).pack(anchor="w")
-        self.label(account_card, "Username atau URL profil Instagram", size=9, color=self.muted, bg=self.card).pack(anchor="w", pady=(8, 4))
+        self.label(
+            account_card, "Username atau URL profil Instagram",
+            size=9, color=self.muted, bg=self.card
+        ).pack(anchor="w", pady=(8, 4))
         self.username_var = tk.StringVar()
         username_entry = ttk.Entry(account_card, textvariable=self.username_var)
         username_entry.pack(fill="x", ipady=2)
@@ -450,28 +524,14 @@ class InstagramArchiveApp:
         )
         self.download_watch_label.pack(anchor="w", pady=(6, 0))
 
-        footer = tk.Frame(form, bg=self.bg)
-        footer.pack(fill="x", pady=(0, 8))
-        self.status_var = tk.StringVar(value="Ready")
-        self.label(footer, "Status:", size=9, color=self.muted, bg=self.bg).pack(side="left")
-        self.status_label = self.label(footer, " Ready", size=9, color=self.green, bg=self.bg)
-        self.status_label.pack(side="left")
-        self.progress = ttk.Progressbar(footer, mode="indeterminate", length=140)
-        self.progress.pack(side="right", padx=(10, 0))
-        self.download_button = self.button(footer, "Start download", self.start_download, primary=True)
-        self.download_button.pack(side="right")
-        self.stop_button = self.button(footer, "Stop", self.stop_download)
-        self.stop_button.pack(side="right", padx=(0, 8))
-        self.stop_button.configure(state="disabled")
-
         log_card = self.card_frame(form)
-        log_card.pack(fill="both", expand=True)
+        log_card.pack(fill="both", expand=True, pady=(0, 6))
         log_head = tk.Frame(log_card, bg=self.card)
         log_head.pack(fill="x")
         self.label(log_head, "Activity log", size=11, bold=True, bg=self.card).pack(side="left")
         self.button(log_head, "Clear", self.clear_log).pack(side="right")
         self.log_text = tk.Text(
-            log_card, height=9, wrap="word", bg="#0a1220", fg="#d9e3f5",
+            log_card, height=8, wrap="word", bg="#0a1220", fg="#d9e3f5",
             insertbackground="#ffffff", relief="flat", bd=0, padx=10, pady=9,
             font=("Consolas", 9),
         )
@@ -481,8 +541,10 @@ class InstagramArchiveApp:
         else:
             self.log_text.insert("end", "Ready. Pilih akun, cookies, dan folder tujuan untuk memulai.\n")
         self.log_text.configure(state="disabled")
+
         self.set_download_state(self.download_active)
         self.update_download_dashboard()
+        canvas.yview_moveto(0)
 
     def toggle_categories(self):
         state = "disabled" if self.all_var.get() else "normal"
