@@ -1242,6 +1242,8 @@ class InstagramArchiveApp:
                     self.process.terminate()
                 except OSError:
                     pass
+        save_settings(self.settings)
+        self.root.destroy()
 
     def poll_events(self):
         try:
